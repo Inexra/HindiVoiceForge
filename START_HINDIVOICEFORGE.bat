@@ -35,6 +35,13 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+echo Installing the CPU-only PyTorch build for this low-memory computer...
+".venv\Scripts\python.exe" -m pip install --disable-pip-version-check torch --index-url https://download.pytorch.org/whl/cpu
+if errorlevel 1 (
+  echo ERROR: Could not install CPU PyTorch. Check your internet connection and retry.
+  pause
+  exit /b 1
+)
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r requirements.txt
 if errorlevel 1 (
   echo ERROR: Package installation failed. Check your internet connection and retry.
