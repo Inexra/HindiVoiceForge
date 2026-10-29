@@ -17,6 +17,11 @@ PORT = int(os.environ.get("HINDIVOICEFORGE_PORT", "7860"))
 
 # Use a portable FFmpeg binary; no separate FFmpeg installation or PATH setup needed.
 AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
+HOST = "0.0.0.0"
+PORT = int(os.environ.get("HINDIVOICEFORGE_PORT", "7860"))
+
+# Use a portable FFmpeg binary; no separate FFmpeg installation or PATH setup needed.
+AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
 VOICES = {
     "Hindi male · Madhur": "hi-IN-MadhurNeural",
     "Hindi female · Swara": "hi-IN-SwaraNeural",
