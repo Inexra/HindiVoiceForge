@@ -349,7 +349,7 @@ def generate_local_audio(
                     concat_items.append(silence_path)
             concat_list = tmp_path / "concat_list.txt"
             concat_list.write_text(
-                "\\n".join(_concat_file_line(path) for path in concat_items),
+                "\n".join(_concat_file_line(path) for path in concat_items),
                 encoding="utf-8",
             )
             output_path = Path(tempfile.gettempdir()) / f"hindi_voiceforge_local_{os.getpid()}.mp3"
