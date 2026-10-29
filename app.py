@@ -297,7 +297,7 @@ def generate_gemini_audio(
             for index, chunk in enumerate(chunks, start=1):
                 progress((index - 1) / len(chunks), desc=f"Gemini TTS: section {index} of {len(chunks)}")
                 payload = {
-                    "model": "gemini-3.8-flash-tts",
+                    "model": "gemini-3.8-flash-lite-tts",
                     "input": [{
                         "type": "user_input",
                         "content": [{
@@ -323,6 +323,30 @@ def generate_gemini_audio(
                         response_data = json.loads(response.read().decode("utf-8"))
                 except urllib.error.HTTPError as exc:
                     detail = exc.read().decode("utf-8", errors="replace")
+                    if exc.code == 429:
+                        try:
+                            error_info = json.loads(detail).get("error", {})
+                            api_message = str(error_info.get("message", detail))
+                        except (ValueError, AttributeError):
+                            api_message = detail
+                        lower_message = api_message.lower()
+                        if "per day" in lower_message or "per-day" in lower_message:
+                            friendly = (
+                                "Gemini's daily free quota is exhausted. Your text has not been generated. "
+                                "Wait until the quota resets, or check your current limits at https://ai.dev/rate-limit. "
+                                f"Provider detail: {api_message[:350]}"
+                            )
+                        elif "per minute" in lower_message or "per-minute" in lower_message:
+                            friendly = (
+                                "Gemini is receiving requests too quickly. Wait for the cooldown shown below "
+                                "before trying again. Provider detail: " + api_message[:350]
+                            )
+                        else:
+                            friendly = (
+                                "Gemini Flash-Lite rate/quota limit reached. Wait and retry, or check "
+                                "https://ai.dev/rate-limit. Provider detail: " + api_message[:350]
+                            )
+                        raise RuntimeError(friendly) from exc
                     if exc.code in (400, 401, 403):
                         raise RuntimeError(f"Gemini rejected the request (HTTP {exc.code}). Check the API key, model access, and quota. {detail[:500]}") from exc
                     raise RuntimeError(f"Gemini API returned HTTP {exc.code}: {detail[:500]}") from exc
@@ -408,7 +432,7 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
             generate = gr.Button("Generate with Edge TTS", variant="primary")
             with gr.Accordion("Generate with Gemini AI (natural expressive voice)", open=True):
                 gr.Markdown(
-                    "Uses Google's dedicated Gemini text-to-speech API. API availability, free quota, and model access depend on your Google AI Studio account. "
+                    "Uses Google's Gemini 3.8 Flash-Lite text-to-speech model, optimized for fast, cost-efficient narration. API availability and free quota depend on your Google AI Studio account. If you hit a per-minute or daily quota, HindiVoiceForge will show a clearer message; switching models does not guarantee a separate quota. "
                     "Your script is sent to Google for synthesis. Never paste your API key into GitHub or share it with anyone."
                 )
                 gemini_api_key = gr.Textbox(
