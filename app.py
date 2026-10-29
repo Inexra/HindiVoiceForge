@@ -27,7 +27,7 @@ def split_text(text: str, max_chars: int = 2200) -> list[str]:
     text = text.strip()
     if not text:
         return []
-    paragraphs = [re.sub(r"\\s+", " ", p).strip() for p in re.split(r"\\n\\s*\\n", text) if p.strip()]
+    paragraphs = [re.sub(r"\s+", " ", p).strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     chunks: list[str] = []
     current = ""
 
@@ -55,7 +55,7 @@ def split_text(text: str, max_chars: int = 2200) -> list[str]:
             current = piece
 
     for paragraph in paragraphs:
-        for sentence in re.split(r"(?<=[.!?।॥])\\s+", paragraph):
+        for sentence in re.split(r"(?<=[.!?।॥])\s+", paragraph):
             if sentence.strip():
                 add_piece(sentence)
     if current:
