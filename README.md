@@ -23,14 +23,14 @@ The port defaults to `7860`. The server is intended for a trusted home network o
 
 ## Features
 
-- Online neural Hindi voices using the Edge TTS service (no API key required by this app).
+- Local open-weight Hindi AI TTS using Indic Tiny TTS (no per-request API quota after the model is downloaded).\n- Online neural Hindi voices using the Edge TTS service (no API key required by this app).
 - Hindi male and female voices: Madhur and Swara.
 - Long-text chunking with paragraph and sentence boundaries.
 - Adjustable narration speed, pitch and volume.
 - MP3 output with chunks joined into one file.
 - Automated tests and GitHub Actions.
 
-> Speech generation requires internet and relies on a third-party service. This project is not affiliated with Microsoft. Voice availability and service access can change. This first version does not provide offline neural TTS.
+> The first launch and initial local-model download require internet. Local AI speech generation works on this computer after the model is cached. Edge TTS and cloud IndicF5 remain online options.
 
 
 ## Optional cloud AI voice (IndicF5)
@@ -48,20 +48,17 @@ IndicF5 uses a reference recording to guide voice characteristics and prosody. U
 
 Template source: https://github.com/AI4Bharat/IndicF5
 
-## Gemini AI text-to-speech
+## Local open-weight Hindi AI TTS
 
-HindiVoiceForge now includes an optional **Generate with Gemini TTS** mode. It sends text to Google's dedicated Gemini TTS API and saves the generated speech as an MP3. Edge TTS remains available as a fallback.
+HindiVoiceForge uses **Indic Tiny TTS: Hindi** as its local AI speech engine. It has male and female Hindi voices, is designed for CPU inference, and downloads about 90 MB of model files. The first model download requires internet; after that, speech generation runs on your own computer without a Gemini API key or per-request API quota.
 
-1. Open [Google AI Studio](https://aistudio.google.com/apikey) and create an API key.
-2. Start HindiVoiceForge and expand **Generate with Gemini AI (natural expressive voice)**.
-3. Paste your key into the password-style field, choose a voice, and adjust the delivery-style instructions if desired.
-4. Generate a short test before sending a long script.
+- The app downloads the model automatically the first time you click **Generate with Local Hindi AI**.
+- The model is intended for Hindi written in Devanagari. English words in Latin script may be skipped; write names phonetically in Hindi where necessary.
+- The voice is a calm reading style rather than highly expressive acting.
+- Model weights are licensed CC BY 4.0 and require attribution; the model code is MIT. Review the [model card and license](https://huggingface.co/sulabhkatiyar/indic-tiny-tts-hindi) before redistribution or commercial use.
+- PyTorch is a large dependency, so the first installation may take a while. The model is small, but the app still needs enough RAM for Python, PyTorch, and Gradio.
 
-The app currently uses the Gemini 3.8 Flash TTS model. Google lists a free tier for this model, but availability, quotas, rate limits, and model access can vary by account and may change. Check the [official Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricing) before relying on it for large projects. On the free tier, Google may use submitted content to improve its products; avoid sensitive or confidential scripts. The key is entered locally in the app and is not saved to the repository. Do not share it or commit it to GitHub.
-
-For more natural results, try a style such as: “Natural Hindi narration by an experienced Indian narrator; warm, clear, conversational, moderate pace, natural pauses, subtle emotion; speak the provided text exactly as written.” TTS output quality and Hindi pronunciation can vary, so listen to a short sample first.
-
-Official documentation: [Gemini speech generation](https://ai.google.dev/gemini-api/docs/speech-generation) · [Pricing](https://ai.google.dev/gemini-api/docs/pricing)
+Model: [sulabhkatiyar/indic-tiny-tts-hindi](https://huggingface.co/sulabhkatiyar/indic-tiny-tts-hindi)
 
 ## Manual start (optional)
 
@@ -79,7 +76,7 @@ py -3.11 -m venv .venv
 - **Hindi male:** `hi-IN-MadhurNeural`
 - **Hindi female:** `hi-IN-SwaraNeural`
 
-Pronunciation can still vary for English names, acronyms, unusual spellings and code-switching. The text is sent to the online speech service. A local model backend can be explored separately, but it is not included in this version; online mode is the practical starting point for a 4 GB RAM laptop.
+Pronunciation can still vary for English names, acronyms, unusual spellings and code-switching. The text is sent to the online speech service. The local AI option is included, but initial dependency and model downloads can be large. On a 4 GB RAM laptop, close other heavy applications while installing or generating audio.
 
 ## License
 
