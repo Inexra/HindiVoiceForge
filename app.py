@@ -58,6 +58,10 @@ def split_text(text: str, max_chars: int = 2200) -> list[str]:
         for sentence in re.split(r"(?<=[.!?।॥])\s+", paragraph):
             if sentence.strip():
                 add_piece(sentence)
+        # Keep paragraph boundaries so the audio can breathe between ideas.
+        if current:
+            chunks.append(current)
+            current = ""
     if current:
         chunks.append(current)
     return chunks
@@ -114,9 +118,31 @@ def generate_audio(
                 part_paths.append(part_path)
 
             progress(0.92, desc="Joining audio sections")
+            # Add a short natural pause at paragraph/chunk boundaries instead of
+            # stitching every generated section directly together.
+            silence_path = tmp_path / "pause.mp3"
+            silence_command = [
+                FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+                "-t", "0.28", "-codec:a", "libmp3lame", "-b:a", "48k",
+                str(silence_path),
+            ]
+            silence_result = subprocess.run(
+                silence_command, capture_output=True, text=True, check=False
+            )
+            if silence_result.returncode != 0 or not silence_path.exists():
+                detail = (silence_result.stderr or silence_result.stdout or "Could not create pause audio").strip()
+                raise RuntimeError(detail[-800:])
+
+            concat_items: list[Path] = []
+            for index, part_path in enumerate(part_paths):
+                concat_items.append(part_path)
+                if index < len(part_paths) - 1:
+                    concat_items.append(silence_path)
+
             concat_list = tmp_path / "concat_list.txt"
             concat_list.write_text(
-                "\n".join(_concat_file_line(path) for path in part_paths),
+                "\n".join(_concat_file_line(path) for path in concat_items),
                 encoding="utf-8",
             )
             output_path = Path(tempfile.gettempdir()) / f"hindi_voiceforge_{os.getpid()}.mp3"
@@ -161,7 +187,7 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
             )
             with gr.Row():
                 voice = gr.Dropdown(choices=list(VOICES), value="Hindi male · Madhur", label="Hindi voice")
-                rate = gr.Slider(-25, 25, value=0, step=5, label="Speed (%)")
+                rate = gr.Slider(-25, 25, value=-5, step=5, label="Speed (%)")
             with gr.Row():
                 pitch = gr.Slider(-10, 10, value=0, step=1, label="Pitch (Hz)")
                 volume = gr.Slider(-20, 20, value=0, step=5, label="Volume (%)")
@@ -171,11 +197,15 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
             status = gr.Textbox(label="Status", interactive=False)
             gr.Markdown(
                 """
-                ### Tips for better pronunciation
-                - Keep Hindi in Devanagari.
-                - Use punctuation and paragraph breaks.
-                - Test difficult English names in a short sample.
-                - The generated audio is joined into one MP3.
+                ### Tips for more natural narration
+                - Start around **-5% speed** for a calmer Hindi delivery; test 0% for energetic scripts.
+                - Keep Hindi in Devanagari and write numbers the way you want them spoken.
+                - Add commas where a speaker would take a small breath and full stops at complete thoughts.
+                - Use a blank line between paragraphs; the app adds a short pause between sections.
+                - Spell out tricky names or English terms phonetically in Hindi if needed.
+                - Avoid ALL CAPS, repeated exclamation marks, and long unpunctuated sentences.
+                
+                **Note:** The free online voice engine does not expose full acting/emotion controls. These changes improve pacing, but cannot guarantee a fully human voice.
                 """
             )
     generate.click(
