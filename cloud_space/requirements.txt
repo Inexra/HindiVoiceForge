@@ -1,0 +1,7 @@
+gradio>=5.20,<6
+spaces
+transformers>=4.45
+torch
+numpy
+soundfile
+git+https://github.com/AI4Bharat/IndicF5.git
