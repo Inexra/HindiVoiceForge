@@ -48,6 +48,21 @@ IndicF5 uses a reference recording to guide voice characteristics and prosody. U
 
 Template source: https://github.com/AI4Bharat/IndicF5
 
+## Gemini AI text-to-speech
+
+HindiVoiceForge now includes an optional **Generate with Gemini TTS** mode. It sends text to Google's dedicated Gemini TTS API and saves the generated speech as an MP3. Edge TTS remains available as a fallback.
+
+1. Open [Google AI Studio](https://aistudio.google.com/apikey) and create an API key.
+2. Start HindiVoiceForge and expand **Generate with Gemini AI (natural expressive voice)**.
+3. Paste your key into the password-style field, choose a voice, and adjust the delivery-style instructions if desired.
+4. Generate a short test before sending a long script.
+
+The app currently uses the Gemini 3.8 Flash TTS model. Google lists a free tier for this model, but availability, quotas, rate limits, and model access can vary by account and may change. Check the [official Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricing) before relying on it for large projects. On the free tier, Google may use submitted content to improve its products; avoid sensitive or confidential scripts. The key is entered locally in the app and is not saved to the repository. Do not share it or commit it to GitHub.
+
+For more natural results, try a style such as: “Natural Hindi narration by an experienced Indian narrator; warm, clear, conversational, moderate pace, natural pauses, subtle emotion; speak the provided text exactly as written.” TTS output quality and Hindi pronunciation can vary, so listen to a short sample first.
+
+Official documentation: [Gemini speech generation](https://ai.google.dev/gemini-api/docs/speech-generation) · [Pricing](https://ai.google.dev/gemini-api/docs/pricing)
+
 ## Manual start (optional)
 
 Open PowerShell in the repository folder:
