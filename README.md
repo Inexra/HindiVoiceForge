@@ -48,6 +48,16 @@ IndicF5 uses a reference recording to guide voice characteristics and prosody. U
 
 Template source: https://github.com/AI4Bharat/IndicF5
 
+## Optional open Hindi AI voice (compact IndicF5 student)
+
+The app also includes **Hindi TTS — distilled IndicF5 student (~190M parameters)** as an online demo option. Choose **Generate with more natural open Hindi AI** in the app. This model is open-weight and Hindi-focused, and its model card reports a benchmark against the larger IndicF5 teacher; results are not a guarantee that every sentence will sound more natural than Edge TTS.
+
+- Model card: https://huggingface.co/5ivatej/hindi-tts-190M
+- Public demo: https://huggingface.co/spaces/5ivatej/hindi-tts-190M
+- This option sends text to the public demo and requires internet. The demo may sleep, be busy, or change its API.
+- It is exposed as an online option rather than a local model because the app targets a low-memory Windows laptop. Even a 190M-parameter model can use significant RAM and run slowly on CPU.
+- The model card lists an MIT license for the student model and notes that the upstream IndicF5/F5-TTS licenses should also be reviewed.
+
 ## Local open-weight Hindi AI TTS
 
 HindiVoiceForge uses **Indic Tiny TTS: Hindi** as its local AI speech engine. It has male and female Hindi voices, is designed for CPU inference, and downloads about 90 MB of model files. The first model download requires internet; after that, speech generation runs on your own computer without a Gemini API key or per-request API quota.
