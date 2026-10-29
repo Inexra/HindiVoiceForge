@@ -8,9 +8,15 @@ from pathlib import Path
 
 import edge_tts
 import gradio as gr
+import imageio_ffmpeg
 from pydub import AudioSegment
 
 APP_TITLE = "HindiVoiceForge"
+HOST = "0.0.0.0"
+PORT = int(os.environ.get("HINDIVOICEFORGE_PORT", "7860"))
+
+# Use a portable FFmpeg binary; no separate FFmpeg installation or PATH setup needed.
+AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
 VOICES = {
     "Hindi male · Madhur": "hi-IN-MadhurNeural",
     "Hindi female · Swara": "hi-IN-SwaraNeural",
@@ -130,7 +136,7 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
         # 🎙️ HindiVoiceForge
         Turn Hindi scripts into downloadable neural voice-overs.
 
-        **Online mode:** uses internet-based Hindi neural voices. Do not submit private or confidential text.
+        **Online mode:** internet is required for Hindi neural voices. Other devices on the same Wi-Fi can open this site at this computer’s LAN IP and port 7860. Use only on a trusted home network; do not submit confidential text.
         """
     )
     with gr.Row():
@@ -167,4 +173,4 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
     )
 
 if __name__ == "__main__":
-    demo.queue().launch()
+    demo.queue().launch(server_name=HOST, server_port=PORT, share=False, inbrowser=True)
