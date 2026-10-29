@@ -32,6 +32,22 @@ The port defaults to `7860`. The server is intended for a trusted home network o
 
 > Speech generation requires internet and relies on a third-party service. This project is not affiliated with Microsoft. Voice availability and service access can change. This first version does not provide offline neural TTS.
 
+
+## Optional cloud AI voice (IndicF5)
+
+The local Edge TTS button remains available. To try the Hindi-focused IndicF5 model without running it on your 4 GB laptop, you can deploy the template in `cloud_space/` to a Hugging Face Gradio Space and use the **Try the more natural cloud AI voice (IndicF5)** section in the app.
+
+1. Create a Hugging Face account and create a Gradio Space. Free ZeroGPU use depends on account eligibility and quota; availability is not guaranteed.
+2. Open https://huggingface.co/ai4bharat/IndicF5 and accept the model's access conditions.
+3. Create a Hugging Face read token and add it to the Space as a secret named `HF_TOKEN`. This is not a paid TTS API key, but it is a credential needed to download this gated model. Never put it in this repository.
+4. Copy `cloud_space/app.py` and `cloud_space/requirements.txt` to the **root** of your new Space. Wait for the Space to build and test it there.
+5. In HindiVoiceForge, expand the cloud AI section, paste your Space URL, upload a short reference recording, and enter the exact transcript of that recording.
+6. Generate a short test first. Cloud inference requires internet and may be unavailable when the Space sleeps or free GPU quota is exhausted.
+
+IndicF5 uses a reference recording to guide voice characteristics and prosody. Use only recordings you own or have explicit permission to use; do not clone another person's voice without permission. The generated speech is not guaranteed to sound fully human. Text and reference audio are sent to your Space for processing, so do not submit confidential material.
+
+Template source: https://github.com/AI4Bharat/IndicF5
+
 ## Manual start (optional)
 
 Open PowerShell in the repository folder:
