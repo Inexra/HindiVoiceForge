@@ -265,6 +265,86 @@ def generate_cloud_audio(
 
 
 
+def generate_student_cloud_audio(
+    text: str,
+    progress=gr.Progress(),
+):
+    """Use the public demo for the open-weight compact Hindi TTS student model."""
+    if not text or not text.strip():
+        raise gr.Error("Paste your Hindi script first.")
+    if len(text) > 20_000:
+        raise gr.Error("This public demo option supports up to 20,000 characters per job. Use Edge TTS for longer scripts.")
+
+    try:
+        from gradio_client import Client
+
+        progress(0.05, desc="Connecting to the open Hindi AI demo")
+        client = Client("https://5ivatej-hindi-tts-190m.hf.space", verbose=False)
+        api = client.view_api(return_format="dict")
+        endpoints = api.get("named_endpoints", {})
+        if not endpoints:
+            raise RuntimeError("The public demo did not expose any callable API endpoints.")
+
+        selected_endpoint = None
+        for endpoint, details in endpoints.items():
+            parameters = details.get("parameters", [])
+            returns = details.get("returns", [])
+            if len(parameters) == 1:
+                parameter_type = parameters[0].get("type", {})
+                if isinstance(parameter_type, dict):
+                    parameter_type = parameter_type.get("type", "")
+                output_description = str(returns).lower()
+                if parameter_type in ("string", "str", "textbox", "text") and (
+                    "audio" in output_description or "file" in output_description or "path" in output_description
+                ):
+                    selected_endpoint = endpoint
+                    break
+        if selected_endpoint is None:
+            # Some Gradio versions omit output component metadata; accept a
+            # single-text-input endpoint and validate the returned result.
+            for endpoint, details in endpoints.items():
+                if len(details.get("parameters", [])) == 1:
+                    selected_endpoint = endpoint
+                    break
+        if selected_endpoint is None:
+            raise RuntimeError("Could not find a text-only endpoint in the public demo.")
+
+        progress(0.25, desc="Generating speech with the compact open Hindi model")
+        result = client.predict(text.strip(), api_name=selected_endpoint)
+        candidates = list(result) if isinstance(result, (tuple, list)) else [result]
+        source_path = None
+        for item in candidates:
+            if isinstance(item, dict):
+                for key in ("path", "name", "url"):
+                    value = item.get(key)
+                    if isinstance(value, str) and value:
+                        source_path = Path(value)
+                        if source_path.exists():
+                            break
+                if source_path and source_path.exists():
+                    break
+            elif isinstance(item, str):
+                candidate = Path(item)
+                if candidate.exists():
+                    source_path = candidate
+                    break
+        if source_path is None or not source_path.exists() or source_path.stat().st_size == 0:
+            raise RuntimeError("The demo response did not contain a downloadable audio file.")
+
+        output_path = Path(tempfile.gettempdir()) / f"hindi_voiceforge_student_{os.getpid()}{source_path.suffix or '.wav'}"
+        shutil.copy2(source_path, output_path)
+        progress(1.0, desc="Done")
+        return str(output_path), "Done. Generated with the open-weight Hindi TTS student model through its public demo."
+    except gr.Error:
+        raise
+    except Exception as exc:
+        raise gr.Error(
+            "The open Hindi AI demo could not generate audio. The public Space may be sleeping, busy, "
+            "or may have changed its API. Check the demo page and retry. "
+            f"Technical detail: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
 # The model is loaded lazily on the first local-TTS request and then kept in memory.
 _LOCAL_TTS = None
 _LOCAL_TTS_ERROR = None
@@ -399,6 +479,15 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
                 pitch = gr.Slider(-10, 10, value=0, step=1, label="Pitch (Hz)")
                 volume = gr.Slider(-20, 20, value=0, step=5, label="Volume (%)")
             generate = gr.Button("Generate with Edge TTS", variant="primary")
+            with gr.Accordion("Generate with more natural open Hindi AI (online demo)", open=False):
+                gr.Markdown(
+                    "Uses the **Hindi TTS distilled IndicF5 student (~190M parameters)** through its public demo. "
+                    "It is an open-weight Hindi model designed for more natural speech than tiny lightweight models. "
+                    "Internet is required and the public demo may be busy or unavailable. "
+                    "[Open the model card](https://huggingface.co/5ivatej/hindi-tts-190M)."
+                )
+                generate_student = gr.Button("Generate with Open Hindi AI", variant="primary")
+
             with gr.Accordion("Generate with local Hindi AI (offline after setup)", open=True):
                 gr.Markdown(
                     "Uses **Indic Tiny TTS**, a small open-weight Hindi model (about 90 MB). "
@@ -459,6 +548,11 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
     generate_cloud.click(
         fn=generate_cloud_audio,
         inputs=[script, cloud_space_url, reference_audio, reference_text],
+        outputs=[audio_file, status],
+    )
+    generate_student.click(
+        fn=generate_student_cloud_audio,
+        inputs=[script],
         outputs=[audio_file, status],
     )
     generate_local.click(
