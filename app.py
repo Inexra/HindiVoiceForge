@@ -3,25 +3,19 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 
 import edge_tts
 import gradio as gr
 import imageio_ffmpeg
-from pydub import AudioSegment
 
 APP_TITLE = "HindiVoiceForge"
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("HINDIVOICEFORGE_PORT", "7860"))
+FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
-# Use a portable FFmpeg binary; no separate FFmpeg installation or PATH setup needed.
-AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
-HOST = "0.0.0.0"
-PORT = int(os.environ.get("HINDIVOICEFORGE_PORT", "7860"))
-
-# Use a portable FFmpeg binary; no separate FFmpeg installation or PATH setup needed.
-AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
 VOICES = {
     "Hindi male · Madhur": "hi-IN-MadhurNeural",
     "Hindi female · Swara": "hi-IN-SwaraNeural",
@@ -33,7 +27,7 @@ def split_text(text: str, max_chars: int = 2200) -> list[str]:
     text = text.strip()
     if not text:
         return []
-    paragraphs = [re.sub(r"\s+", " ", p).strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    paragraphs = [re.sub(r"\\s+", " ", p).strip() for p in re.split(r"\\n\\s*\\n", text) if p.strip()]
     chunks: list[str] = []
     current = ""
 
@@ -61,15 +55,8 @@ def split_text(text: str, max_chars: int = 2200) -> list[str]:
             current = piece
 
     for paragraph in paragraphs:
-        # Keep punctuation attached to each sentence.
-        sentences = re.split(r"(?<=[.!?।॥])\s+", paragraph)
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-            if len(sentence) > max_chars:
-                add_piece(sentence)
-            else:
+        for sentence in re.split(r"(?<=[.!?।॥])\\s+", paragraph):
+            if sentence.strip():
                 add_piece(sentence)
     if current:
         chunks.append(current)
@@ -87,6 +74,12 @@ async def synthesize_chunk(text: str, voice: str, rate: int, pitch: int, volume:
     await communicate.save(str(output))
 
 
+def _concat_file_line(path: Path) -> str:
+    """Format a path for FFmpeg's concat demuxer."""
+    value = path.resolve().as_posix().replace("'", "'\\''")
+    return f"file '{value}'"
+
+
 def generate_audio(
     text: str,
     voice_label: str,
@@ -99,38 +92,52 @@ def generate_audio(
         raise gr.Error("Paste your Hindi script first.")
     if voice_label not in VOICES:
         raise gr.Error("Choose a supported Hindi voice.")
+    if len(text) > 100_000:
+        raise gr.Error("This version supports up to 100,000 characters per job. Split larger scripts into separate jobs.")
 
     chunks = split_text(text)
     if not chunks:
         raise gr.Error("There is no text to convert.")
-    if len(text) > 100_000:
-        raise gr.Error("This version supports up to 100,000 characters per job. Split larger scripts into separate jobs.")
 
     try:
         with tempfile.TemporaryDirectory(prefix="hindi-voiceforge-") as tmp:
             tmp_path = Path(tmp)
-            audio_parts: list[AudioSegment] = []
+            part_paths: list[Path] = []
             for index, chunk in enumerate(chunks, start=1):
                 progress((index - 1) / len(chunks), desc=f"Generating section {index} of {len(chunks)}")
                 part_path = tmp_path / f"part_{index:04d}.mp3"
-                asyncio.run(synthesize_chunk(chunk, VOICES[voice_label], int(rate), int(pitch), int(volume), part_path))
-                audio_parts.append(AudioSegment.from_file(part_path, format="mp3"))
-            progress(0.95, desc="Joining audio sections")
-            combined = AudioSegment.empty()
-            for index, part in enumerate(audio_parts):
-                if index:
-                    combined += AudioSegment.silent(duration=220)
-                combined += part
+                asyncio.run(synthesize_chunk(
+                    chunk, VOICES[voice_label], int(rate), int(pitch), int(volume), part_path
+                ))
+                if not part_path.exists() or part_path.stat().st_size == 0:
+                    raise RuntimeError(f"Voice service returned an empty audio file for section {index}.")
+                part_paths.append(part_path)
+
+            progress(0.92, desc="Joining audio sections")
+            concat_list = tmp_path / "concat_list.txt"
+            concat_list.write_text(
+                "\n".join(_concat_file_line(path) for path in part_paths),
+                encoding="utf-8",
+            )
             output_path = Path(tempfile.gettempdir()) / f"hindi_voiceforge_{os.getpid()}.mp3"
-            combined.export(output_path, format="mp3", bitrate="192k")
+            command = [
+                FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "concat", "-safe", "0", "-i", str(concat_list),
+                "-vn", "-c:a", "libmp3lame", "-b:a", "192k", str(output_path),
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+            if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+                detail = (result.stderr or result.stdout or "FFmpeg did not create an output file").strip()
+                raise RuntimeError(detail[-1200:])
+
             progress(1.0, desc="Done")
-            duration = len(combined) / 1000
-            return str(output_path), f"Done. Generated {len(chunks)} section(s), {duration / 60:.1f} minute(s) of audio."
+            return str(output_path), f"Done. Generated {len(chunks)} section(s) and joined them into one MP3."
     except gr.Error:
         raise
     except Exception as exc:
         raise gr.Error(
-            "Audio generation failed. Check your internet connection and make sure FFmpeg is installed and available on PATH. "
+            "Audio generation failed. Check your internet connection. HindiVoiceForge includes its own FFmpeg, "
+            "so you do not need to install FFmpeg separately. "
             f"Technical detail: {type(exc).__name__}: {exc}"
         ) from exc
 
