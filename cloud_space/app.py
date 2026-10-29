@@ -1,6 +1,4 @@
 import os
-from functools import lru_cache
-
 import gradio as gr
 import numpy as np
 import soundfile as sf
@@ -11,18 +9,16 @@ from transformers import AutoModel
 MODEL_ID = "ai4bharat/IndicF5"
 
 
-@lru_cache(maxsize=1)
-def get_model():
-    # The model is cached on CPU between requests; ZeroGPU is allocated only
-    # while generate_speech is running.
-    return AutoModel.from_pretrained(
-        MODEL_ID,
-        trust_remote_code=True,
-        token=os.environ.get("HF_TOKEN"),
-    )
+# ZeroGPU expects the model to be registered on CUDA at startup. Its CUDA
+# emulation packs the weights and only allocates real GPU resources per request.
+MODEL = AutoModel.from_pretrained(
+    MODEL_ID,
+    trust_remote_code=True,
+    token=os.environ.get("HF_TOKEN"),
+).to("cuda")
 
 
-@spaces.GPU(duration=180)
+@spaces.GPU(duration=120)
 def generate_speech(text: str, reference_audio: str, reference_text: str):
     if not text or not text.strip():
         raise gr.Error("Enter Hindi text first.")
@@ -33,23 +29,12 @@ def generate_speech(text: str, reference_audio: str, reference_text: str):
     if not reference_text or not reference_text.strip():
         raise gr.Error("Enter the exact words spoken in the reference recording.")
 
-    model = get_model()
-    try:
-        model = model.to("cuda")
-        with torch.inference_mode():
-            audio = model(
-                text.strip(),
-                ref_audio_path=reference_audio,
-                ref_text=reference_text.strip(),
-            )
-    finally:
-        # Free GPU allocation after each request on ZeroGPU.
-        try:
-            model = model.to("cpu")
-        except Exception:
-            pass
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+    with torch.inference_mode():
+        audio = MODEL(
+            text.strip(),
+            ref_audio_path=reference_audio,
+            ref_text=reference_text.strip(),
+        )
 
     audio = np.asarray(audio)
     if audio.dtype == np.int16:
