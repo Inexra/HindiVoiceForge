@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -264,144 +265,112 @@ def generate_cloud_audio(
 
 
 
-def generate_gemini_audio(
+# The model is loaded lazily on the first local-TTS request and then kept in memory.
+_LOCAL_TTS = None
+_LOCAL_TTS_ERROR = None
+
+
+def _get_local_tts(progress):
+    """Load a small Hindi-only model locally; no inference API or API key is used."""
+    global _LOCAL_TTS, _LOCAL_TTS_ERROR
+    if _LOCAL_TTS is not None:
+        return _LOCAL_TTS
+    if _LOCAL_TTS_ERROR is not None:
+        raise RuntimeError(_LOCAL_TTS_ERROR)
+    progress(0.03, desc="Preparing local Hindi model (first run downloads about 90 MB)")
+    try:
+        import sys
+        from huggingface_hub import snapshot_download
+        model_dir = snapshot_download("sulabhkatiyar/indic-tiny-tts-hindi")
+        if model_dir not in sys.path:
+            sys.path.insert(0, model_dir)
+        from indic_tiny_tts import TinyTTS
+        progress(0.08, desc="Loading local Hindi voice model")
+        _LOCAL_TTS = TinyTTS.from_pretrained(
+            "sulabhkatiyar/indic-tiny-tts-hindi", device="cpu", threads=2
+        )
+        return _LOCAL_TTS
+    except Exception as exc:
+        _LOCAL_TTS_ERROR = (
+            f"Could not load the local Hindi model: {type(exc).__name__}: {exc}. "
+            "Check your internet connection for the first model download, then restart HindiVoiceForge."
+        )
+        raise RuntimeError(_LOCAL_TTS_ERROR) from exc
+
+
+def generate_local_audio(
     text: str,
-    api_key: str,
-    voice_name: str,
-    delivery_style: str,
+    local_voice: str,
+    speed: float,
     progress=gr.Progress(),
 ):
-    """Generate expressive speech using Google's Gemini TTS API."""
-    import base64
-    import json
-    import urllib.error
-    import urllib.request
-
+    """Generate Hindi speech locally with Indic Tiny TTS; no API key or per-request quota."""
     if not text or not text.strip():
         raise gr.Error("Paste your Hindi script first.")
-    if not api_key or not api_key.strip():
-        raise gr.Error("Enter your Gemini API key. Get one from Google AI Studio.")
+    if local_voice not in ("female", "male"):
+        raise gr.Error("Choose a supported local Hindi voice.")
     if len(text) > 100_000:
         raise gr.Error("This version supports up to 100,000 characters per job. Split larger scripts into separate jobs.")
 
-    chunks = split_text(text, max_chars=1800)
+    # This model is trained for Devanagari Hindi. Warn rather than silently
+    # implying it can speak arbitrary Latin-script English text.
+    chunks = split_text(text, max_chars=900)
     if not chunks:
         raise gr.Error("There is no text to convert.")
-
-    key = api_key.strip()
-    style = (delivery_style or "").strip() or "Natural Hindi narration, warm and clear, moderate pace, conversational delivery, gentle pauses, no exaggerated acting. Pronounce Hindi naturally and do not translate or paraphrase the supplied text."
     try:
-        with tempfile.TemporaryDirectory(prefix="hindi-voiceforge-gemini-") as tmp:
+        tts = _get_local_tts(progress)
+        with tempfile.TemporaryDirectory(prefix="hindi-voiceforge-local-") as tmp:
             tmp_path = Path(tmp)
             wav_paths: list[Path] = []
             for index, chunk in enumerate(chunks, start=1):
-                progress((index - 1) / len(chunks), desc=f"Gemini TTS: section {index} of {len(chunks)}")
-                payload = {
-                    "model": "gemini-3.8-flash-lite-tts",
-                    "input": [{
-                        "type": "user_input",
-                        "content": [{
-                            "type": "text",
-                            "text": chunk,
-                            "annotations": [{
-                                "type": "speech_metadata",
-                                "style": style,
-                            }],
-                        }],
-                    }],
-                    "response_format": {"type": "audio"},
-                    "generation_config": {"speech_config": [{"voice": voice_name}]},
-                }
-                request = urllib.request.Request(
-                    "https://generativelanguage.googleapis.com/v1beta/interactions",
-                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                    headers={"Content-Type": "application/json", "x-goog-api-key": key},
-                    method="POST",
-                )
-                try:
-                    with urllib.request.urlopen(request, timeout=180) as response:
-                        response_data = json.loads(response.read().decode("utf-8"))
-                except urllib.error.HTTPError as exc:
-                    detail = exc.read().decode("utf-8", errors="replace")
-                    if exc.code == 429:
-                        try:
-                            error_info = json.loads(detail).get("error", {})
-                            api_message = str(error_info.get("message", detail))
-                        except (ValueError, AttributeError):
-                            api_message = detail
-                        lower_message = api_message.lower()
-                        if "per day" in lower_message or "per-day" in lower_message:
-                            friendly = (
-                                "Gemini's daily free quota is exhausted. Your text has not been generated. "
-                                "Wait until the quota resets, or check your current limits at https://ai.dev/rate-limit. "
-                                f"Provider detail: {api_message[:350]}"
-                            )
-                        elif "per minute" in lower_message or "per-minute" in lower_message:
-                            friendly = (
-                                "Gemini is receiving requests too quickly. Wait for the cooldown shown below "
-                                "before trying again. Provider detail: " + api_message[:350]
-                            )
-                        else:
-                            friendly = (
-                                "Gemini Flash-Lite rate/quota limit reached. Wait and retry, or check "
-                                "https://ai.dev/rate-limit. Provider detail: " + api_message[:350]
-                            )
-                        raise RuntimeError(friendly) from exc
-                    if exc.code in (400, 401, 403):
-                        raise RuntimeError(f"Gemini rejected the request (HTTP {exc.code}). Check the API key, model access, and quota. {detail[:500]}") from exc
-                    raise RuntimeError(f"Gemini API returned HTTP {exc.code}: {detail[:500]}") from exc
-
-                audio_data = None
-                output_audio = response_data.get("output_audio")
-                if isinstance(output_audio, dict):
-                    audio_data = output_audio.get("data")
-                if not audio_data:
-                    for step in response_data.get("steps", []):
-                        for item in step.get("content", []) if isinstance(step, dict) else []:
-                            if isinstance(item, dict) and item.get("type") == "audio" and item.get("data"):
-                                audio_data = item["data"]
-                if not audio_data:
-                    raise RuntimeError("Gemini returned no audio. Try a shorter text or a different voice.")
+                progress(0.1 + 0.75 * (index - 1) / len(chunks),
+                         desc=f"Local Hindi TTS: section {index} of {len(chunks)}")
+                wav = tts.synthesize(chunk, voice=local_voice, speed=float(speed))
                 wav_path = tmp_path / f"part_{index:04d}.wav"
-                wav_path.write_bytes(base64.b64decode(audio_data))
-                if wav_path.stat().st_size < 100:
-                    raise RuntimeError("Gemini returned an empty or invalid audio file.")
+                tts.save_wav(wav, str(wav_path))
+                if not wav_path.exists() or wav_path.stat().st_size < 100:
+                    raise RuntimeError(f"Local model produced no audio for section {index}.")
                 wav_paths.append(wav_path)
 
-            progress(0.92, desc="Joining Gemini audio sections")
+            progress(0.9, desc="Joining local audio sections")
             silence_path = tmp_path / "pause.wav"
-            silence_command = [
+            silence_result = subprocess.run([
                 FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
                 "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
                 "-t", "0.28", "-c:a", "pcm_s16le", str(silence_path),
-            ]
-            silence_result = subprocess.run(silence_command, capture_output=True, text=True, check=False)
+            ], capture_output=True, text=True, check=False)
             if silence_result.returncode != 0 or not silence_path.exists():
                 raise RuntimeError((silence_result.stderr or "Could not create pause audio")[-800:])
 
             concat_items: list[Path] = []
-            for index, path in enumerate(wav_paths):
-                concat_items.append(path)
+            for index, wav_path in enumerate(wav_paths):
+                concat_items.append(wav_path)
                 if index < len(wav_paths) - 1:
                     concat_items.append(silence_path)
             concat_list = tmp_path / "concat_list.txt"
-            concat_list.write_text("\n".join(_concat_file_line(path) for path in concat_items), encoding="utf-8")
-            output_path = Path(tempfile.gettempdir()) / f"hindi_voiceforge_gemini_{os.getpid()}.mp3"
-            command = [
+            concat_list.write_text(
+                "\\n".join(_concat_file_line(path) for path in concat_items),
+                encoding="utf-8",
+            )
+            output_path = Path(tempfile.gettempdir()) / f"hindi_voiceforge_local_{os.getpid()}.mp3"
+            result = subprocess.run([
                 FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
                 "-f", "concat", "-safe", "0", "-i", str(concat_list),
                 "-vn", "-c:a", "libmp3lame", "-b:a", "192k", str(output_path),
-            ]
-            result = subprocess.run(command, capture_output=True, text=True, check=False)
+            ], capture_output=True, text=True, check=False)
             if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
                 raise RuntimeError((result.stderr or result.stdout or "FFmpeg could not join audio")[-1000:])
             progress(1.0, desc="Done")
-            return str(output_path), f"Done. Gemini generated {len(chunks)} section(s) and joined them into one MP3."
+            return str(output_path), (
+                f"Done. Generated {len(chunks)} section(s) locally with Indic Tiny TTS. "
+                "No Gemini API or per-request quota was used."
+            )
     except gr.Error:
         raise
     except Exception as exc:
         raise gr.Error(
-            "Gemini TTS failed. Check your internet connection, API key, model availability, and quota. "
+            "Local Hindi TTS failed. The first run needs internet to download the model; "
+            "after download, synthesis runs on this computer. "
             f"Technical detail: {type(exc).__name__}: {exc}"
         ) from exc
 
@@ -430,28 +399,25 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
                 pitch = gr.Slider(-10, 10, value=0, step=1, label="Pitch (Hz)")
                 volume = gr.Slider(-20, 20, value=0, step=5, label="Volume (%)")
             generate = gr.Button("Generate with Edge TTS", variant="primary")
-            with gr.Accordion("Generate with Gemini AI (natural expressive voice)", open=True):
+            with gr.Accordion("Generate with local Hindi AI (offline after setup)", open=True):
                 gr.Markdown(
-                    "Uses Google's Gemini 3.8 Flash-Lite text-to-speech model, optimized for fast, cost-efficient narration. API availability and free quota depend on your Google AI Studio account. If you hit a per-minute or daily quota, HindiVoiceForge will show a clearer message; switching models does not guarantee a separate quota. "
-                    "Your script is sent to Google for synthesis. Never paste your API key into GitHub or share it with anyone."
-                )
-                gemini_api_key = gr.Textbox(
-                    label="Gemini API key",
-                    placeholder="Paste your key from Google AI Studio",
-                    type="password",
+                    "Uses **Indic Tiny TTS**, a small open-weight Hindi model (about 90 MB). "
+                    "The first use downloads the model and needs internet; subsequent speech generation runs locally "
+                    "without a Gemini API key, API quota, or per-request charge. It is optimized for Devanagari Hindi; "
+                    "write English names phonetically in Hindi for best results. Model weights are CC BY 4.0; "
+                    "see the model card for attribution terms."
                 )
                 with gr.Row():
-                    gemini_voice = gr.Dropdown(
-                        choices=["Kore", "Charon", "Aoede", "Leda", "Orus", "Schedar", "Sulafat", "Achird"],
-                        value="Kore",
-                        label="Gemini voice",
+                    local_voice = gr.Dropdown(
+                        choices=[("Female voice", "female"), ("Male voice", "male")],
+                        value="female",
+                        label="Local Hindi voice",
                     )
-                gemini_style = gr.Textbox(
-                    label="Delivery style",
-                    value="Natural Hindi narration by an experienced Indian narrator; warm, clear, conversational, moderate pace, natural breathing and pauses, subtle emotion, not robotic. Speak the provided Hindi text exactly as written without translating or paraphrasing.",
-                    lines=3,
-                )
-                generate_gemini = gr.Button("Generate with Gemini TTS", variant="primary")
+                    local_speed = gr.Slider(
+                        minimum=0.75, maximum=1.25, value=1.0, step=0.05,
+                        label="Local speech speed",
+                    )
+                generate_local = gr.Button("Generate with Local Hindi AI", variant="primary")
 
             with gr.Accordion("Try the more natural cloud AI voice (IndicF5)", open=False):
                 gr.Markdown(
@@ -495,9 +461,9 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
         inputs=[script, cloud_space_url, reference_audio, reference_text],
         outputs=[audio_file, status],
     )
-    generate_gemini.click(
-        fn=generate_gemini_audio,
-        inputs=[script, gemini_api_key, gemini_voice, gemini_style],
+    generate_local.click(
+        fn=generate_local_audio,
+        inputs=[script, local_voice, local_speed],
         outputs=[audio_file, status],
     )
 
