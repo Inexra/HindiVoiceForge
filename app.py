@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -168,6 +169,100 @@ def generate_audio(
         ) from exc
 
 
+def generate_cloud_audio(
+    text: str,
+    cloud_space_url: str,
+    reference_audio: str,
+    reference_text: str,
+    progress=gr.Progress(),
+):
+    """Use a user-owned Hugging Face Space for IndicF5 cloud inference."""
+    if not text or not text.strip():
+        raise gr.Error("Paste your Hindi script first.")
+    if len(text) > 100_000:
+        raise gr.Error("This version supports up to 100,000 characters per job.")
+    if not cloud_space_url or not cloud_space_url.strip():
+        raise gr.Error("Paste the URL of your deployed HindiVoiceForge Cloud Space.")
+    if not reference_audio:
+        raise gr.Error("Upload a short reference voice recording you own or have permission to use.")
+    if not reference_text or not reference_text.strip():
+        raise gr.Error("Enter the exact transcript spoken in the reference recording.")
+
+    try:
+        from gradio_client import Client
+
+        chunks = split_text(text)
+        if not chunks:
+            raise gr.Error("There is no text to convert.")
+
+        space_url = cloud_space_url.strip().rstrip("/")
+        if not (space_url.startswith("https://") or space_url.startswith("http://")):
+            raise gr.Error("Cloud Space URL should start with https:// or http://.")
+        client = Client(space_url, verbose=False)
+
+        with tempfile.TemporaryDirectory(prefix="hindi-voiceforge-cloud-") as tmp:
+            tmp_path = Path(tmp)
+            wav_paths: list[Path] = []
+            for index, chunk in enumerate(chunks, start=1):
+                progress((index - 1) / len(chunks), desc=f"Cloud AI: section {index} of {len(chunks)}")
+                result = client.predict(
+                    chunk,
+                    reference_audio,
+                    reference_text.strip(),
+                    api_name="/generate_speech",
+                )
+                if isinstance(result, (tuple, list)):
+                    result = result[0]
+                source_path = Path(str(result))
+                if not source_path.exists() or source_path.stat().st_size == 0:
+                    raise RuntimeError("The Cloud Space returned no audio file.")
+                destination = tmp_path / f"part_{index:04d}.wav"
+                shutil.copy2(source_path, destination)
+                wav_paths.append(destination)
+
+            progress(0.92, desc="Joining cloud-generated audio")
+            silence_path = tmp_path / "pause.wav"
+            silence_command = [
+                FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+                "-t", "0.28", "-c:a", "pcm_s16le", str(silence_path),
+            ]
+            silence_result = subprocess.run(silence_command, capture_output=True, text=True, check=False)
+            if silence_result.returncode != 0 or not silence_path.exists():
+                raise RuntimeError((silence_result.stderr or "Could not create pause audio")[-800:])
+
+            concat_items: list[Path] = []
+            for index, path in enumerate(wav_paths):
+                concat_items.append(path)
+                if index < len(wav_paths) - 1:
+                    concat_items.append(silence_path)
+            concat_list = tmp_path / "concat_list.txt"
+            concat_list.write_text(
+                "\n".join(_concat_file_line(path) for path in concat_items),
+                encoding="utf-8",
+            )
+            output_path = Path(tempfile.gettempdir()) / f"hindi_voiceforge_cloud_{os.getpid()}.mp3"
+            command = [
+                FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "concat", "-safe", "0", "-i", str(concat_list),
+                "-vn", "-c:a", "libmp3lame", "-b:a", "192k", str(output_path),
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+            if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+                raise RuntimeError((result.stderr or result.stdout or "FFmpeg could not join audio")[-1000:])
+            progress(1.0, desc="Done")
+            return str(output_path), f"Done. IndicF5 cloud voice generated {len(chunks)} section(s)."
+
+    except gr.Error:
+        raise
+    except Exception as exc:
+        raise gr.Error(
+            "Cloud generation failed. Check that your Space is running, the model access was accepted, "
+            "and the Space exposes the /generate_speech API. "
+            f"Technical detail: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
 with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
     gr.Markdown(
         """
@@ -191,7 +286,23 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
             with gr.Row():
                 pitch = gr.Slider(-10, 10, value=0, step=1, label="Pitch (Hz)")
                 volume = gr.Slider(-20, 20, value=0, step=5, label="Volume (%)")
-            generate = gr.Button("Generate Hindi audio", variant="primary")
+            generate = gr.Button("Generate with Edge TTS", variant="primary")
+            with gr.Accordion("Try the more natural cloud AI voice (IndicF5)", open=False):
+                gr.Markdown(
+                    "Requires your own deployed Hugging Face Space. This model uses a reference recording, "
+                    "so upload a voice you own or have permission to use and enter its exact transcript."
+                )
+                cloud_space_url = gr.Textbox(
+                    label="Cloud Space URL",
+                    placeholder="https://huggingface.co/spaces/YOUR-USERNAME/YOUR-SPACE",
+                )
+                reference_audio = gr.Audio(label="Reference voice recording", type="filepath")
+                reference_text = gr.Textbox(
+                    label="Exact transcript of the reference recording",
+                    lines=2,
+                    placeholder="Type exactly what is spoken in the recording…",
+                )
+                generate_cloud = gr.Button("Generate with IndicF5 Cloud AI", variant="primary")
         with gr.Column(scale=2):
             audio_file = gr.Audio(label="Preview", type="filepath")
             status = gr.Textbox(label="Status", interactive=False)
@@ -211,6 +322,11 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
     generate.click(
         fn=generate_audio,
         inputs=[script, voice, rate, pitch, volume],
+        outputs=[audio_file, status],
+    )
+    generate_cloud.click(
+        fn=generate_cloud_audio,
+        inputs=[script, cloud_space_url, reference_audio, reference_text],
         outputs=[audio_file, status],
     )
 
