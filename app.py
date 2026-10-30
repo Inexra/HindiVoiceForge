@@ -18,52 +18,14 @@ HOST = "0.0.0.0"
 PORT = int(os.environ.get("HINDIVOICEFORGE_PORT", "7860"))
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
-FALLBACK_VOICES = [
-    ("महिला · Swara", "hi-IN-SwaraNeural"),
-    ("पुरुष · Madhur", "hi-IN-MadhurNeural"),
-]
+VOICES = {
+    "Hindi female · Swara": "hi-IN-SwaraNeural",
+    "Hindi female · Ananya": "hi-IN-AnanyaNeural",
+    "Hindi female · Kavya": "hi-IN-KavyaNeural",
+    "Hindi male · Madhur": "hi-IN-MadhurNeural",
+}
 
-
-async def _list_hindi_edge_voices() -> list[tuple[str, str]]:
-    """Discover the Hindi voices currently exposed by the Edge TTS catalogue."""
-    try:
-        available = await edge_tts.list_voices()
-        hindi = [
-            item for item in available
-            if str(item.get("Locale", "")).lower() == "hi-in"
-        ]
-        # Prefer female voices, then sort by their friendly display name.
-        hindi.sort(key=lambda item: (
-            0 if str(item.get("Gender", "")).lower() == "female" else 1,
-            str(item.get("FriendlyName") or item.get("ShortName") or ""),
-        ))
-        choices = []
-        for item in hindi:
-            short_name = str(item.get("ShortName", "")).strip()
-            if not short_name:
-                continue
-            gender = str(item.get("Gender", "")).lower()
-            label_gender = "महिला" if gender == "female" else "पुरुष" if gender == "male" else "Hindi"
-            friendly = str(item.get("FriendlyName") or short_name)
-            # Keep the selector compact while retaining a recognisable voice name.
-            name = friendly.split(" - ")[0].strip()
-            choices.append((f"{label_gender} · {name}", short_name))
-        return choices or FALLBACK_VOICES
-    except Exception:
-        return FALLBACK_VOICES
-
-
-try:
-    HINDI_VOICE_CHOICES = asyncio.run(_list_hindi_edge_voices())
-except RuntimeError:
-    # A running event loop is unusual during a normal desktop launch.
-    HINDI_VOICE_CHOICES = FALLBACK_VOICES
-
-VOICES = {short_name: label for label, short_name in HINDI_VOICE_CHOICES}
-DEFAULT_VOICE = next(
-    (short_name for label, short_name in HINDI_VOICE_CHOICES if label.startswith("महिला")),
-    HINDI_VOICE_CHOICES[0][1],
-)
+DEFAULT_VOICE = "Hindi female · Swara"
 
 
 
@@ -156,7 +118,7 @@ def generate_audio(
                 progress((index - 1) / len(chunks), desc=f"Generating section {index} of {len(chunks)}")
                 part_path = tmp_path / f"part_{index:04d}.mp3"
                 asyncio.run(synthesize_chunk(
-                    chunk, voice_label, int(rate), int(pitch), int(volume), part_path
+                    chunk, VOICES[voice_label], int(rate), int(pitch), int(volume), part_path
                 ))
                 if not part_path.exists() or part_path.stat().st_size == 0:
                     raise RuntimeError(f"Voice service returned an empty audio file for section {index}.")
@@ -209,24 +171,6 @@ def generate_audio(
         raise gr.Error(
             "Audio generation failed. Check your internet connection. HindiVoiceForge includes its own FFmpeg, "
             "so you do not need to install FFmpeg separately. "
-            f"Technical detail: {type(exc).__name__}: {exc}"
-        ) from exc
-
-
-def preview_hindi_voice(voice_name: str):
-    """Create a short preview using the currently selected Edge Hindi voice."""
-    if voice_name not in VOICES:
-        raise gr.Error("Choose a supported Hindi voice.")
-    sample = "नमस्कार! यह हिंदी वॉइस का छोटा सा नमूना है। आप इस आवाज़ को सुनकर चुन सकते हैं।"
-    try:
-        output_path = Path(tempfile.gettempdir()) / f"hindi_voiceforge_preview_{os.getpid()}.mp3"
-        asyncio.run(synthesize_chunk(sample, voice_name, 0, 0, 0, output_path))
-        if not output_path.exists() or output_path.stat().st_size == 0:
-            raise RuntimeError("The voice service returned an empty preview.")
-        return str(output_path)
-    except Exception as exc:
-        raise gr.Error(
-            "Voice preview failed. Check your internet connection. "
             f"Technical detail: {type(exc).__name__}: {exc}"
         ) from exc
 
@@ -534,13 +478,8 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
                 max_lines=30,
             )
             with gr.Row():
-                voice = gr.Dropdown(
-                    choices=HINDI_VOICE_CHOICES,
-                    value=DEFAULT_VOICE,
-                    label="Hindi voice · Female voices first",
-                )
-                preview_voice = gr.Button("▶ Preview voice")
-                rate = gr.Slider(-25, 10, value=10, step=5, label="Speed (%)")
+                voice = gr.Dropdown(choices=list(VOICES), value=DEFAULT_VOICE, label="Hindi voice")
+                rate = gr.Slider(-25, 25, value=-5, step=5, label="Speed (%)")
             with gr.Row():
                 pitch = gr.Slider(-10, 10, value=0, step=1, label="Pitch (Hz)")
                 volume = gr.Slider(-20, 20, value=0, step=5, label="Volume (%)")
@@ -607,11 +546,6 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
                 **Note:** The free online voice engine does not expose full acting/emotion controls. These changes improve pacing, but cannot guarantee a fully human voice.
                 """
             )
-    preview_voice.click(
-        fn=preview_hindi_voice,
-        inputs=[voice],
-        outputs=[audio_file],
-    )
     generate.click(
         fn=generate_audio,
         inputs=[script, voice, rate, pitch, volume],
