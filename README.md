@@ -24,9 +24,11 @@ The port defaults to `7860`. The server is intended for a trusted home network o
 ## Features
 
 - Local open-weight Hindi AI TTS using Indic Tiny TTS (no per-request API quota after the model is downloaded).\n- Online neural Hindi voices using the Edge TTS service (no API key required by this app).
-- Hindi male and female voices: Madhur and Swara.
+- Hindi voices discovered dynamically from the Edge TTS catalogue, with female voices listed before male voices.
+- A short Hindi voice-preview button so you can listen before generating a full script.
+- Female Hindi voice selected by default when one is available.
 - Long-text chunking with paragraph and sentence boundaries.
-- Adjustable narration speed, pitch and volume.
+- Adjustable narration speed (-25% to +10%), pitch and volume. The default speed is +10%.
 - MP3 output with chunks joined into one file.
 - Automated tests and GitHub Actions.
 
@@ -81,10 +83,11 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe app.py
 ```
 
-## Voice choices
+## Hindi voice catalogue
 
-- **Hindi male:** `hi-IN-MadhurNeural`
-- **Hindi female:** `hi-IN-SwaraNeural`
+HindiVoiceForge retrieves the available `hi-IN` voices from the Edge TTS catalogue when it starts. Female voices are sorted first and a female voice is selected by default when available. The list can change as Microsoft updates its catalogue. If the catalogue cannot be reached at startup, the app falls back to Swara (female) and Madhur (male).
+
+Use **Preview voice** to hear a short Hindi sample before generating your script. The preview and Edge TTS generation both require an internet connection.
 
 Pronunciation can still vary for English names, acronyms, unusual spellings and code-switching. The text is sent to the online speech service. The local AI option is included, but initial dependency and model downloads can be large. On a 4 GB RAM laptop, close other heavy applications while installing or generating audio.
 
