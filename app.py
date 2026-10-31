@@ -18,10 +18,9 @@ HOST = "0.0.0.0"
 PORT = int(os.environ.get("HINDIVOICEFORGE_PORT", "7860"))
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
+# Keep only voices verified by the user to generate audio reliably.
 VOICES = {
     "Hindi female · Swara": "hi-IN-SwaraNeural",
-    "Hindi female · Ananya": "hi-IN-AnanyaNeural",
-    "Hindi female · Kavya": "hi-IN-KavyaNeural",
     "Hindi male · Madhur": "hi-IN-MadhurNeural",
 }
 
@@ -536,7 +535,7 @@ with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
                 """
                 ### Tips for more natural narration
                 - Start at **+10% speed** for a lively delivery; reduce the speed for calmer narration.
-                - Use **Preview voice** to listen to the selected Hindi voice before generating your full script.
+                - Choose Swara or Madhur for reliable Edge TTS narration.
                 - Keep Hindi in Devanagari and write numbers the way you want them spoken.
                 - Add commas where a speaker would take a small breath and full stops at complete thoughts.
                 - Use a blank line between paragraphs; the app adds a short pause between sections.
